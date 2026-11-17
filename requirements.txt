@@ -3,3 +3,5 @@ pandas
 gspread
 yfinance
 pandas-datareader
+plotly
+numpy
