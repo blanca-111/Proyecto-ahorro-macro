@@ -61,7 +61,7 @@ else:
     st.sidebar.warning("Usando ahorro por defecto")
 
 st.sidebar.header("2. Parámetros del Simulador")
-cap_ini = st.sidebar.slider("Capital Inicial (€)", 0, 200000, 15000, 1000)
+cap_ini = st.sidebar.slider("Capital Inicial (€)", 0, 200000, 0, 1000)
 ahorro = st.sidebar.slider("Ahorro Mensual (€)", 0, 5000, ahorro_detectado, 50)
 anos = st.sidebar.slider("Horizonte (Años)", 5, 35, 20, 1)
 
