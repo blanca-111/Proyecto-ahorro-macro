@@ -2,6 +2,8 @@
 
 Columnas esperadas en la hoja 'Mi_Ahorro_Mensual':
 Fecha | Ingresos_Netos | Gastos_Fijos | Ahorro_Invertido | Activo_Principal | Liquidez_Efectivo
+
+Liquidez_Efectivo es lo que se aparta cada mes en efectivo (un flujo), no el saldo total.
 """
 import re
 
@@ -82,8 +84,6 @@ def preparar_datos(df):
         meses = sorted(df.loc[duplicados, "Fecha"].dt.strftime("%m/%Y").unique())
         avisos.append(f"Meses repetidos (se suman): {', '.join(meses)}.")
         agregaciones = {c: "sum" for c in COLUMNAS_NUMERICAS if c in df.columns}
-        if "Liquidez_Efectivo" in agregaciones:
-            agregaciones["Liquidez_Efectivo"] = "last"  # es un saldo, no un flujo
         if "Activo_Principal" in df.columns:
             agregaciones["Activo_Principal"] = "last"
         df = df.groupby("Fecha", as_index=False).agg(agregaciones)
@@ -95,6 +95,11 @@ def preparar_datos(df):
         if len(huecos):
             avisos.append(f"Faltan {len(huecos)} mes(es) sin registrar: "
                           f"{', '.join(huecos.strftime('%m/%Y')[:6])}{'…' if len(huecos) > 6 else ''}.")
+        mes_pasado = (pd.Timestamp.today().to_period("M") - 1).to_timestamp()
+        if df["Fecha"].max() < mes_pasado:
+            sin_datos = len(pd.date_range(df["Fecha"].max(), mes_pasado, freq="MS")) - 1
+            avisos.append(f"El último registro es de {df['Fecha'].max():%m/%Y}: faltan {sin_datos} mes(es) "
+                          f"hasta {mes_pasado:%m/%Y}. Los resúmenes no incluyen esos meses.")
     return df, avisos
 
 
@@ -140,10 +145,16 @@ def mostrar_mis_finanzas(df_bruto, ipc_mensual):
         df["Gastos_Reales"] = gas * factor
         df["Ingresos_Reales"] = ing * factor
 
+    # Liquidez_Efectivo es lo que apartas en efectivo cada mes; si no existe, se usa el sobrante
+    tiene_liquidez = "Liquidez_Efectivo" in df and df["Liquidez_Efectivo"].notna().any()
+    df["Efectivo_Mes"] = df["Liquidez_Efectivo"].fillna(0) if tiene_liquidez else df["Sobrante"].clip(lower=0)
+    saldo_inicial = st.number_input(
+        "Efectivo que ya tenías antes del primer mes registrado (€)", min_value=0, value=0, step=100,
+        help="Se suma a lo apartado cada mes en Liquidez_Efectivo para estimar tu colchón actual.")
+    liquidez = saldo_inicial + df["Efectivo_Mes"].sum()
     ultimos12 = df.tail(12)
     n = len(ultimos12)
     gasto_medio = ultimos12["Gastos_Fijos"].mean()
-    liquidez = df["Liquidez_Efectivo"].dropna().iloc[-1] if "Liquidez_Efectivo" in df and df["Liquidez_Efectivo"].notna().any() else None
 
     # --- KPIs ---
     st.subheader(f"Resumen de los últimos {n} meses")
@@ -163,15 +174,16 @@ def mostrar_mis_finanzas(df_bruto, ipc_mensual):
         c4.metric("Fondo de emergencia", f"{meses_colchon:.1f} meses".replace(".", ","),
                   delta="OK (≥ 6 meses)" if meses_colchon >= 6 else "Por debajo de 6 meses",
                   delta_color="normal" if meses_colchon >= 6 else "inverse",
-                  help=f"Liquidez actual ({euros(liquidez)}) / gasto fijo medio ({euros(gasto_medio)})")
+                  help=f"Efectivo acumulado estimado ({euros(liquidez)}) / gasto fijo medio ({euros(gasto_medio)})")
     else:
-        c4.metric("Fondo de emergencia", "—", help="Rellena Liquidez_Efectivo para calcularlo")
+        c4.metric("Fondo de emergencia", "—", help="Rellena Gastos_Fijos para calcularlo")
 
     sobrante_medio = ultimos12["Sobrante"].mean()
-    if sobrante_medio > 50:
-        st.info(f"Cada mes te quedan de media **{euros(sobrante_medio)}** sin gastar ni invertir "
-                f"(ingresos − gastos − inversión). Si no es liquidez que quieras mantener, es capacidad de inversión extra.")
-    elif sobrante_medio < -50:
+    sin_asignar = (ultimos12["Sobrante"] - ultimos12["Efectivo_Mes"]).mean() if tiene_liquidez else 0
+    if tiene_liquidez and abs(sin_asignar) > 20:
+        st.warning(f"Ingresos − gastos − inversión − liquidez no cuadra: de media quedan **{euros(sin_asignar)}** "
+                   "al mes sin registrar. ¿Falta algún gasto variable?")
+    if sobrante_medio < -50:
         st.warning(f"De media gastas e inviertes **{euros(-sobrante_medio)}** más de lo que ingresas al mes: "
                    "revisa si estás tirando de liquidez.")
 
@@ -180,7 +192,7 @@ def mostrar_mis_finanzas(df_bruto, ipc_mensual):
     fig = go.Figure()
     fig.add_bar(x=df["Fecha"], y=df["Gastos_Fijos"], name="Gastos fijos", marker_color=ROJO)
     fig.add_bar(x=df["Fecha"], y=df["Ahorro_Invertido"], name="Invertido", marker_color=VERDE)
-    fig.add_bar(x=df["Fecha"], y=df["Sobrante"].clip(lower=0), name="Sobrante", marker_color=GRIS)
+    fig.add_bar(x=df["Fecha"], y=df["Efectivo_Mes"], name="Liquidez apartada", marker_color=GRIS)
     fig.add_scatter(x=df["Fecha"], y=df["Ingresos_Netos"], name="Ingresos netos", mode="lines+markers",
                     line=dict(color=AZUL, width=3))
     fig.update_layout(barmode="stack", template="plotly_dark", height=420, hovermode="x unified",
