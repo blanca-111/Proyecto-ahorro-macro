@@ -98,6 +98,14 @@ def preparar_datos(df):
     return df, avisos
 
 
+def gasto_mensual_medio(df_bruto, meses=12):
+    """Media de Gastos_Fijos de los últimos 'meses' registrados (None si no hay datos)."""
+    df, _ = preparar_datos(df_bruto)
+    if df.empty or df["Gastos_Fijos"].dropna().empty:
+        return None
+    return float(df["Gastos_Fijos"].dropna().tail(meses).mean())
+
+
 def euros(x):
     return f"{x:,.0f} €".replace(",", ".")
 
