@@ -4,6 +4,7 @@ import numpy as np
 import gspread
 import yfinance as yf
 import plotly.graph_objects as go
+from finanzas import a_numero, mostrar_mis_finanzas
 from datetime import datetime
 
 st.set_page_config(page_title="Dashboard Macro-Financiero Real", layout="wide")
@@ -50,23 +51,26 @@ def cargar_datos_etf(ticker):
         return CAGR_DEFECTO, VOL_DEFECTO, None, None, f"{type(e).__name__}: {e}"
 
 @st.cache_data(ttl=3600)
-def cargar_inflacion():
-    """Inflación interanual del IPC Eurozona (FRED). Devuelve (inflación %, fecha del dato, error)."""
-    try:
-        ipc = pd.read_csv(FRED_IPC_EUROZONA)
-        ipc.columns = ["fecha", "valor"]
-        ipc["fecha"] = pd.to_datetime(ipc["fecha"])
-        ipc["valor"] = pd.to_numeric(ipc["valor"], errors="coerce")
-        ipc = ipc.dropna().set_index("fecha")["valor"]
+def cargar_ipc_mensual():
+    """Serie mensual del IPC Eurozona (FRED), indexada por el primer día de cada mes."""
+    ipc = pd.read_csv(FRED_IPC_EUROZONA)
+    ipc.columns = ["fecha", "valor"]
+    ipc["fecha"] = pd.to_datetime(ipc["fecha"])
+    ipc["valor"] = pd.to_numeric(ipc["valor"], errors="coerce")
+    return ipc.dropna().set_index("fecha")["valor"]
 
+def cargar_inflacion():
+    """Inflación interanual del IPC Eurozona. Devuelve (inflación %, fecha del dato, serie IPC, error)."""
+    try:
+        ipc = cargar_ipc_mensual()
         ultima = ipc.index[-1]
         hace_un_ano = ultima - pd.DateOffset(years=1)
         if hace_un_ano not in ipc.index:
             raise ValueError("falta el dato de hace 12 meses")
         inf = (ipc.loc[ultima] / ipc.loc[hace_un_ano] - 1) * 100
-        return round(float(inf), 2), ultima.strftime("%m/%Y"), None
+        return round(float(inf), 2), ultima.strftime("%m/%Y"), ipc, None
     except Exception as e:
-        return INF_DEFECTO, None, f"{type(e).__name__}: {e}"
+        return INF_DEFECTO, None, None, f"{type(e).__name__}: {e}"
 
 df_personal, error_sheets = cargar_datos_personales()
 conectado_sheets = error_sheets is None
@@ -75,7 +79,7 @@ conectado_sheets = error_sheets is None
 st.sidebar.header("1. Fuente de Datos en Vivo")
 ticker_sel = st.sidebar.selectbox("ETF / Índice de referencia", ["IWDA.AS", "SPY", "QQQ", "VWCE.DE"], index=0)
 cagr_real, vol_real, anos_hist, serie_etf, error_etf = cargar_datos_etf(ticker_sel)
-inf_real, fecha_ipc, error_ipc = cargar_inflacion()
+inf_real, fecha_ipc, serie_ipc, error_ipc = cargar_inflacion()
 
 if error_etf:
     st.sidebar.error(f"No se pudo descargar {ticker_sel} de Yahoo Finance. Se usan valores por defecto "
@@ -93,7 +97,7 @@ elif df_personal.empty:
 elif 'Ahorro_Invertido' not in df_personal.columns:
     st.sidebar.warning("La hoja no tiene la columna 'Ahorro_Invertido'. Usando ahorro por defecto (800 €/mes).")
 else:
-    serie_ahorro = pd.to_numeric(df_personal['Ahorro_Invertido'], errors='coerce').dropna()
+    serie_ahorro = df_personal['Ahorro_Invertido'].map(a_numero).dropna()
     if serie_ahorro.empty:
         st.sidebar.warning("La columna 'Ahorro_Invertido' no tiene números válidos. Usando ahorro por defecto.")
     else:
@@ -173,12 +177,21 @@ c4.metric("Efectivo Parado (Real)", f"{ultimo['4. Efectivo sin Invertir Real (�
 st.divider()
 
 # --- PESTAÑAS DE ANÁLISIS ---
-tab1, tab2, tab3, tab4 = st.tabs([
+tab0, tab1, tab2, tab3, tab4 = st.tabs([
+    "Mis Finanzas",
     "Proyección Macro", 
     "Simulación Monte Carlo (Interactivo)", 
     "Histórico Real del ETF", 
     "Mis Registros (Google Sheets)"
 ])
+
+with tab0:
+    if conectado_sheets and not df_personal.empty:
+        if error_ipc:
+            st.caption("Sin datos del IPC: los importes no se ajustan por inflación.")
+        mostrar_mis_finanzas(df_personal, serie_ipc)
+    else:
+        st.info("Conecta Google Sheets para ver el análisis de tus finanzas (ver pestaña 'Mis Registros').")
 
 with tab1:
     st.subheader(f"Proyección Determinista a {anos} años")
