@@ -12,10 +12,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from estilo import eur, estilo_fig, linea, mostrar, paleta, pct
+
 COLUMNAS_NUMERICAS = ["Ingresos_Netos", "Gastos_Fijos", "Ahorro_Invertido", "Liquidez_Efectivo"]
 COLUMNAS_OBLIGATORIAS = ["Fecha", "Ingresos_Netos", "Gastos_Fijos", "Ahorro_Invertido"]
-
-VERDE, ROJO, AZUL, GRIS, AMARILLO = "#2ecc71", "#e74c3c", "#3498db", "#95a5a6", "#f1c40f"
 
 
 def a_numero(valor):
@@ -111,21 +111,18 @@ def gasto_mensual_medio(df_bruto, meses=12):
     return float(df["Gastos_Fijos"].dropna().tail(meses).mean())
 
 
-def euros(x):
-    return f"{x:,.0f} €".replace(",", ".")
+def mostrar_mis_finanzas(df_bruto, ipc_mensual, saldo_inicial=0):
+    """Pinta la pestaña 'Mis finanzas'.
 
-
-def pct(x):
-    return f"{x:.1f} %".replace(".", ",")
-
-
-def mostrar_mis_finanzas(df_bruto, ipc_mensual):
-    """Pinta la pestaña 'Mis finanzas'. ipc_mensual: serie del IPC indexada por mes (o None)."""
+    ipc_mensual: serie del IPC indexada por mes (o None).
+    saldo_inicial: efectivo que ya había antes del primer mes registrado.
+    """
+    p = paleta()
     df, avisos = preparar_datos(df_bruto)
     for a in avisos:
         st.warning(a)
     if df.empty:
-        st.info("No hay registros válidos para analizar.")
+        st.info("La hoja no tiene registros válidos. Añade al menos un mes con fecha, ingresos, gastos e inversión.")
         return
 
     ing, gas, inv = df["Ingresos_Netos"].fillna(0), df["Gastos_Fijos"].fillna(0), df["Ahorro_Invertido"].fillna(0)
@@ -134,97 +131,90 @@ def mostrar_mis_finanzas(df_bruto, ipc_mensual):
     df["Tasa_Inversion"] = np.where(ing > 0, inv / ing * 100, np.nan)
     df["Aportado_Acumulado"] = inv.cumsum()
 
-    # --- Ajuste por inflación: todo en euros del último mes con IPC disponible ---
+    # Ajuste por inflación: todo en euros del último mes con IPC disponible
     hay_ipc = ipc_mensual is not None and len(ipc_mensual) > 0
     if hay_ipc:
-        ipc_meses = ipc_mensual.reindex(pd.date_range(min(ipc_mensual.index.min(), df["Fecha"].min()),
-                                                      max(ipc_mensual.index.max(), df["Fecha"].max()), freq="MS")).ffill().bfill()
-        ipc_ref = ipc_meses.iloc[-1]
-        factor = (ipc_ref / ipc_meses.reindex(df["Fecha"]).to_numpy())
-        df["Aportado_Real"] = (inv * factor).cumsum()
-        df["Gastos_Reales"] = gas * factor
-        df["Ingresos_Reales"] = ing * factor
+        meses_ipc = pd.date_range(min(ipc_mensual.index.min(), df["Fecha"].min()),
+                                  max(ipc_mensual.index.max(), df["Fecha"].max()), freq="MS")
+        ipc_meses = ipc_mensual.reindex(meses_ipc).ffill().bfill()
+        df["Aportado_Real"] = (inv * ipc_meses.iloc[-1] / ipc_meses.reindex(df["Fecha"]).to_numpy()).cumsum()
 
     # Liquidez_Efectivo es lo que apartas en efectivo cada mes; si no existe, se usa el sobrante
     tiene_liquidez = "Liquidez_Efectivo" in df and df["Liquidez_Efectivo"].notna().any()
     df["Efectivo_Mes"] = df["Liquidez_Efectivo"].fillna(0) if tiene_liquidez else df["Sobrante"].clip(lower=0)
-    saldo_inicial = st.number_input(
-        "Efectivo que ya tenías antes del primer mes registrado (€)", min_value=0, value=0, step=100,
-        help="Se suma a lo apartado cada mes en Liquidez_Efectivo para estimar tu colchón actual.")
     liquidez = saldo_inicial + df["Efectivo_Mes"].sum()
     ultimos12 = df.tail(12)
-    n = len(ultimos12)
     gasto_medio = ultimos12["Gastos_Fijos"].mean()
 
-    # --- KPIs ---
-    st.subheader(f"Resumen de los últimos {n} meses")
+    # --- Resumen ---
+    st.subheader(f"Tus últimos {len(ultimos12)} meses")
     c1, c2, c3, c4 = st.columns(4)
     tasa = ultimos12["Tasa_Ahorro"].mean()
     tasa_prev = df.iloc[-24:-12]["Tasa_Ahorro"].mean() if len(df) > 12 else np.nan
-    c1.metric("Tasa de ahorro media", pct(tasa),
-              delta=None if np.isnan(tasa_prev) else f"{tasa - tasa_prev:+.1f} pp vs. 12 meses anteriores",
-              help="(Ingresos − Gastos fijos) / Ingresos")
-    c2.metric("Invertido / ingresos", pct(ultimos12["Tasa_Inversion"].mean()),
+    c1.metric("Ahorras", pct(tasa), border=True,
+              delta=f"{eur(ultimos12['Ingresos_Netos'].mean() - gasto_medio)} al mes" if np.isnan(tasa_prev)
+              else f"{tasa - tasa_prev:+.1f} puntos en un año".replace(".", ","),
+              delta_color="off" if np.isnan(tasa_prev) else "normal",
+              help="(Ingresos − gastos fijos) / ingresos. La variación compara con los 12 meses anteriores")
+    c2.metric("Inviertes", pct(ultimos12["Tasa_Inversion"].mean()), border=True,
+              delta=f"{eur(ultimos12['Ahorro_Invertido'].mean())} al mes", delta_color="off", delta_arrow="off",
               help="Parte de tus ingresos que acaba invertida")
-    c3.metric("Total aportado", euros(df["Aportado_Acumulado"].iloc[-1]),
-              delta=f"{euros(df['Aportado_Real'].iloc[-1])} en euros de hoy" if hay_ipc else None,
-              delta_color="off", help="Suma de Ahorro_Invertido. En euros de hoy: cada aportación revalorizada con el IPC")
-    if liquidez is not None and gasto_medio > 0:
+    c3.metric("Has aportado", eur(df["Aportado_Acumulado"].iloc[-1]), border=True,
+              delta=f"{eur(df['Aportado_Real'].iloc[-1])} en euros de hoy" if hay_ipc else None,
+              delta_color="off", delta_arrow="off",
+              help="Suma de Ahorro_Invertido. En euros de hoy: cada aportación revalorizada con el IPC")
+    if gasto_medio > 0:
         meses_colchon = liquidez / gasto_medio
-        c4.metric("Fondo de emergencia", f"{meses_colchon:.1f} meses".replace(".", ","),
-                  delta="OK (≥ 6 meses)" if meses_colchon >= 6 else "Por debajo de 6 meses",
-                  delta_color="normal" if meses_colchon >= 6 else "inverse",
-                  help=f"Efectivo acumulado estimado ({euros(liquidez)}) / gasto fijo medio ({euros(gasto_medio)})")
+        c4.metric("Colchón de emergencia", f"{meses_colchon:.1f} meses".replace(".", ","), border=True,
+                  delta="Cubre 6 meses o más" if meses_colchon >= 6 else "Por debajo de 6 meses",
+                  delta_color="normal" if meses_colchon >= 6 else "inverse", delta_arrow="off",
+                  help=f"Efectivo acumulado estimado ({eur(liquidez)}) / gasto fijo medio ({eur(gasto_medio)})")
     else:
-        c4.metric("Fondo de emergencia", "—", help="Rellena Gastos_Fijos para calcularlo")
+        c4.metric("Colchón de emergencia", "—", border=True, help="Rellena Gastos_Fijos para calcularlo")
 
     sobrante_medio = ultimos12["Sobrante"].mean()
     sin_asignar = (ultimos12["Sobrante"] - ultimos12["Efectivo_Mes"]).mean() if tiene_liquidez else 0
     if tiene_liquidez and abs(sin_asignar) > 20:
-        st.warning(f"Ingresos − gastos − inversión − liquidez no cuadra: de media quedan **{euros(sin_asignar)}** "
-                   "al mes sin registrar. ¿Falta algún gasto variable?")
+        st.warning(f"Tus cifras no cuadran: de media quedan **{eur(sin_asignar)}** al mes sin registrar "
+                   "(ingresos − gastos − inversión − liquidez). ¿Falta algún gasto variable?")
     if sobrante_medio < -50:
-        st.warning(f"De media gastas e inviertes **{euros(-sobrante_medio)}** más de lo que ingresas al mes: "
-                   "revisa si estás tirando de liquidez.")
+        st.warning(f"De media gastas e inviertes **{eur(-sobrante_medio)}** más de lo que ingresas al mes. "
+                   "Revisa si estás tirando de tus ahorros.")
 
     # --- Flujo mensual ---
-    st.subheader("Flujo mensual")
+    st.subheader("A dónde va cada euro que ingresas")
     fig = go.Figure()
-    fig.add_bar(x=df["Fecha"], y=df["Gastos_Fijos"], name="Gastos fijos", marker_color=ROJO)
-    fig.add_bar(x=df["Fecha"], y=df["Ahorro_Invertido"], name="Invertido", marker_color=VERDE)
-    fig.add_bar(x=df["Fecha"], y=df["Efectivo_Mes"], name="Liquidez apartada", marker_color=GRIS)
-    fig.add_scatter(x=df["Fecha"], y=df["Ingresos_Netos"], name="Ingresos netos", mode="lines+markers",
-                    line=dict(color=AZUL, width=3))
-    fig.update_layout(barmode="stack", template="plotly_dark", height=420, hovermode="x unified",
-                      yaxis_title="€ / mes", legend=dict(orientation="h", y=1.1))
-    st.plotly_chart(fig, width="stretch")
+    for col, nombre, color in (("Gastos_Fijos", "Gastos fijos", p["erosion"]),
+                               ("Ahorro_Invertido", "Invertido", p["real"]),
+                               ("Efectivo_Mes", "Liquidez apartada", p["liquidez"])):
+        fig.add_bar(x=df["Fecha"], y=df[col], name=nombre, marker=dict(color=color, line=dict(color=p["fondo"], width=1)),
+                    hovertemplate="%{y:,.0f} €")
+    linea(fig, df["Fecha"], df["Ingresos_Netos"], "Ingresos netos", p["texto"], hovertemplate="%{y:,.0f} €")
+    fig.update_layout(barmode="stack")
+    mostrar(estilo_fig(fig, alto=400, titulo_y="€ al mes", fechas=True))
 
-    # --- Tasa de ahorro ---
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("Tasa de ahorro")
         fig = go.Figure()
-        fig.add_bar(x=df["Fecha"], y=df["Tasa_Ahorro"], name="Mensual", marker_color=VERDE, opacity=0.5)
-        fig.add_scatter(x=df["Fecha"], y=df["Tasa_Ahorro"].rolling(3, min_periods=1).mean(),
-                        name="Media móvil 3 meses", line=dict(color=AMARILLO, width=3))
-        fig.update_layout(template="plotly_dark", height=350, yaxis_title="%", hovermode="x unified",
-                          legend=dict(orientation="h", y=1.15))
-        st.plotly_chart(fig, width="stretch")
+        fig.add_bar(x=df["Fecha"], y=df["Tasa_Ahorro"], name="Cada mes", marker_color=p["nominal"],
+                    opacity=0.45, hovertemplate="%{y:.1f} %")
+        linea(fig, df["Fecha"], df["Tasa_Ahorro"].rolling(3, min_periods=1).mean(), "Media de 3 meses",
+              p["real"], hovertemplate="%{y:.1f} %")
+        fig.update_yaxes(ticksuffix=" %")
+        mostrar(estilo_fig(fig, alto=340, fechas=True))
 
-    # --- Aportado nominal vs real ---
     with col_b:
-        st.subheader("Capital aportado")
+        st.subheader("Lo que has aportado")
         fig = go.Figure()
-        fig.add_scatter(x=df["Fecha"], y=df["Aportado_Acumulado"], name="Nominal (lo que pusiste)",
-                        line=dict(color=GRIS, dash="dash"))
+        linea(fig, df["Fecha"], df["Aportado_Acumulado"], "Lo que pusiste", p["nominal"], discontinua=True,
+              hovertemplate="%{y:,.0f} €")
         if hay_ipc:
-            fig.add_scatter(x=df["Fecha"], y=df["Aportado_Real"], name="En euros de hoy (IPC)",
-                            line=dict(color=VERDE, width=3))
-        fig.update_layout(template="plotly_dark", height=350, yaxis_title="€", hovermode="x unified",
-                          legend=dict(orientation="h", y=1.15))
-        st.plotly_chart(fig, width="stretch")
+            linea(fig, df["Fecha"], df["Aportado_Real"], "En euros de hoy", p["real"], hovertemplate="%{y:,.0f} €")
+        fig.update_yaxes(ticksuffix=" €")
+        mostrar(estilo_fig(fig, alto=340, fechas=True))
         if hay_ipc:
-            st.caption("Para no perder poder adquisitivo, tu cartera debería valer al menos la línea verde.")
+            st.caption("Para no perder poder adquisitivo, tu cartera debería valer al menos la línea azul.")
 
     # --- Inflación personal ---
     if hay_ipc and len(df) >= 13:
@@ -232,34 +222,36 @@ def mostrar_mis_finanzas(df_bruto, ipc_mensual):
         g = df.set_index("Fecha")["Gastos_Fijos"]
         ipc_df = ipc_meses.reindex(df["Fecha"])
         anos = (df["Fecha"].iloc[-1] - df["Fecha"].iloc[0]).days / 365.25
-        crec_gasto_total = (g.tail(3).mean() / g.head(3).mean()) ** (1 / anos) - 1 if anos > 0 and g.head(3).mean() > 0 else np.nan
+        crec_gasto = (g.tail(3).mean() / g.head(3).mean()) ** (1 / anos) - 1 if anos > 0 and g.head(3).mean() > 0 else np.nan
         crec_ipc = (ipc_df.iloc[-1] / ipc_df.iloc[0]) ** (1 / anos) - 1 if anos > 0 else np.nan
         c1, c2 = st.columns(2)
-        c1.metric("Tus gastos fijos crecen", pct(crec_gasto_total * 100) + " /año",
-                  help="Media de los 3 últimos meses frente a los 3 primeros, anualizado")
-        c2.metric("IPC Eurozona en el mismo periodo", pct(crec_ipc * 100) + " /año",
-                  delta=f"{(crec_gasto_total - crec_ipc) * 100:+.1f} pp tu inflación personal vs IPC",
+        c1.metric("Tus gastos fijos suben", pct(crec_gasto * 100) + " al año", border=True,
+                  delta=f"{eur(g.tail(3).mean())} al mes ahora", delta_color="off", delta_arrow="off",
+                  help="Media de los 3 últimos meses frente a los 3 primeros, anualizada")
+        c2.metric("El IPC sube", pct(crec_ipc * 100) + " al año", border=True,
+                  delta=f"{(crec_gasto - crec_ipc) * 100:+.1f} puntos de inflación personal".replace(".", ","),
                   delta_color="inverse")
-        base_g, base_i = g.head(3).mean(), ipc_df.iloc[0]
         fig = go.Figure()
-        fig.add_scatter(x=df["Fecha"], y=g.rolling(3, min_periods=1).mean() / base_g * 100,
-                        name="Tus gastos fijos (media 3m)", line=dict(color=ROJO, width=3))
-        fig.add_scatter(x=df["Fecha"], y=ipc_df.to_numpy() / base_i * 100, name="IPC Eurozona",
-                        line=dict(color=AZUL, dash="dash"))
-        fig.update_layout(template="plotly_dark", height=350, yaxis_title="Índice (inicio = 100)",
-                          hovermode="x unified", legend=dict(orientation="h", y=1.15))
-        st.plotly_chart(fig, width="stretch")
+        linea(fig, df["Fecha"], g.rolling(3, min_periods=1).mean() / g.head(3).mean() * 100,
+              "Tus gastos fijos (media de 3 meses)", p["erosion"], hovertemplate="%{y:.1f}")
+        linea(fig, df["Fecha"], ipc_df.to_numpy() / ipc_df.iloc[0] * 100, "IPC Eurozona", p["nominal"],
+              discontinua=True, hovertemplate="%{y:.1f}")
+        mostrar(estilo_fig(fig, alto=340, titulo_y="Índice (inicio = 100)", fechas=True))
 
     # --- Activos ---
     if "Activo_Principal" in df.columns:
         activos = df["Activo_Principal"].astype(str).str.strip()
         activos = activos[activos.ne("") & activos.ne("nan")]
         if len(activos) and pd.to_numeric(activos, errors="coerce").isna().all():
-            st.subheader("¿Dónde inviertes?")
-            reparto = df.loc[activos.index].groupby(activos)["Ahorro_Invertido"].sum().sort_values(ascending=False)
-            fig = go.Figure(go.Pie(labels=reparto.index, values=reparto.values, hole=0.5))
-            fig.update_layout(template="plotly_dark", height=350)
-            st.plotly_chart(fig, width="stretch")
+            st.subheader("Dónde inviertes")
+            reparto = df.loc[activos.index].groupby(activos)["Ahorro_Invertido"].sum().sort_values()
+            fig = go.Figure(go.Bar(x=reparto.values, y=reparto.index, orientation="h", marker_color=p["real"],
+                                   text=[f"{eur(v)} ({pct(v / reparto.sum() * 100, 0)})" for v in reparto.values],
+                                   textposition="outside", textfont=dict(color=p["texto"]),
+                                   hovertemplate="%{y}: %{x:,.0f} €<extra></extra>"))
+            fig.update_xaxes(showticklabels=False, showgrid=False, range=[0, reparto.max() * 1.35])
+            fig.update_yaxes(showgrid=False)
+            mostrar(estilo_fig(fig, alto=80 + 44 * len(reparto), leyenda=False))
 
-    with st.expander("Ver datos procesados"):
-        st.dataframe(df, width="stretch")
+    with st.expander("Ver los datos procesados"):
+        st.dataframe(df, width="stretch", hide_index=True)

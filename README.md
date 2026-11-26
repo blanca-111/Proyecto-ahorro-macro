@@ -1,4 +1,4 @@
-# Simulador Macro-Financiero en Tiempo Real
+# Tu ahorro en euros de hoy
 
 Aplicación web en **Python + Streamlit** que conecta mis finanzas personales (registradas en **Google Sheets**) con datos de mercado (**Yahoo Finance**) y de inflación de la Eurozona (**FRED**). Responde a una pregunta concreta:
 
@@ -6,7 +6,7 @@ Aplicación web en **Python + Streamlit** que conecta mis finanzas personales (r
 
 🔗 **App en vivo:** [proyecto-ahorro-macro.streamlit.app](https://proyecto-ahorro-macro-hd6ww2gwmwlbkd6r3ufd8d.streamlit.app/) (acceso protegido con contraseña porque muestra datos personales)
 
-![Pestaña Mis Finanzas](docs/img/mis_finanzas.png)
+![Inicio de la app: patrimonio nominal frente a poder adquisitivo real](docs/img/inicio.png)
 
 > Las capturas de este README usan **datos de ejemplo**, no datos reales.
 
@@ -39,10 +39,25 @@ Todos los parámetros (capital inicial, ahorro mensual, horizonte, rentabilidad,
 
 <table>
 <tr>
+<td><img src="docs/img/mis_finanzas.png" alt="Mis finanzas"></td>
 <td><img src="docs/img/independencia.png" alt="Independencia financiera"></td>
+</tr>
+<tr>
 <td><img src="docs/img/montecarlo.png" alt="Monte Carlo"></td>
+<td><img src="docs/img/modo_oscuro.png" alt="Modo oscuro"></td>
 </tr>
 </table>
+
+---
+
+## Diseño
+
+La identidad visual parte del objeto que la app estudia: **el billete de euro**.
+
+- **Colores**: fondo gris verdoso de papel de seguridad, texto en tinta azul calcográfica, **azul** para el dinero que conservas, **ocre** para lo que se lleva la inflación, **turquesa** para la liquidez y **gris** para las cifras nominales. Cada color significa lo mismo en todos los gráficos.
+- **Elemento principal**: arriba del todo, la cifra nominal frente a la real y una **barra de erosión** que muestra qué parte del patrimonio se come la inflación.
+- **Tipografía**: *Bricolage Grotesque* para títulos y cifras grandes, *Public Sans* para texto y datos.
+- **Accesibilidad**: paleta validada para daltonismo y contraste, con **modo claro y oscuro** propios (no una inversión automática), y diseño adaptado a móvil. La animación de la barra respeta la preferencia de reducir movimiento.
 
 ---
 
@@ -66,7 +81,7 @@ Los datos se guardan en caché (`st.cache_data`): Google Sheets durante 5 minuto
 - **Inflación interanual**: IPC del último mes frente al mismo mes del año anterior.
 
 ### Motor de proyección (mensual)
-Las dos simulaciones, determinista y Monte Carlo, siguen las **mismas reglas**, para que sus resultados sean comparables:
+Un **único motor** (`simulacion.py`) calcula todos los escenarios: con volatilidad 0 da la proyección determinista, y con volatilidad real, los escenarios Monte Carlo. Así todos siguen las **mismas reglas** y sus resultados son comparables:
 - La cartera rinde en términos **nominales** y se aporta al inicio de cada mes.
 - Opcionalmente, la aportación mensual **sube cada año con la inflación**, para mantener su poder adquisitivo.
 - El resultado se **deflacta** con la inflación acumulada para expresarlo en euros de hoy.
@@ -94,7 +109,7 @@ Los datos introducidos a mano en una hoja de cálculo suelen tener inconsistenci
 | Capa | Tecnología |
 |---|---|
 | Lenguaje | Python 3.11 |
-| Interfaz web | Streamlit |
+| Interfaz web | Streamlit (tema propio en `.streamlit/config.toml`) |
 | Datos y cálculo | pandas, NumPy |
 | Gráficos interactivos | Plotly |
 | Integraciones | gspread (Google Sheets API), yfinance, FRED |
@@ -115,8 +130,12 @@ Los datos introducidos a mano en una hoja de cálculo suelen tener inconsistenci
 ## Estructura del proyecto
 
 ```
-├── app.py               # App Streamlit: datos de mercado, simulaciones y pestañas
+├── app.py               # Interfaz: barra lateral, cabecera y pestañas
+├── datos.py             # Carga de Google Sheets, Yahoo Finance y FRED
+├── simulacion.py        # Motor de proyección único (determinista y Monte Carlo)
 ├── finanzas.py          # Limpieza y análisis de la hoja de Google Sheets
+├── estilo.py            # Paleta, formato de cifras y estilo común de los gráficos
+├── .streamlit/config.toml  # Tema visual (fuentes, colores claro/oscuro)
 ├── requirements.txt     # Dependencias
 ├── .devcontainer/       # Entorno de desarrollo reproducible
 └── docs/img/            # Capturas para este README

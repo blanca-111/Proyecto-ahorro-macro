@@ -1,0 +1,42 @@
+# Identidad visual "billete": papel de seguridad, tinta azul y ocre de la inflación.
+# La paleta de los gráficos está en estilo.py (validada para daltonismo y contraste).
+
+[theme]
+font = "Public Sans:https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap"
+headingFont = "'Bricolage Grotesque':https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&display=swap"
+headingFontSizes = ["2.6rem", "1.6rem", "1.25rem"]
+baseFontSize = 15
+metricValueFontSize = "1.85rem"
+metricValueFontWeight = 600
+baseRadius = "6px"
+showWidgetBorder = true
+
+[theme.light]
+primaryColor = "#2B55A6"
+backgroundColor = "#F2F3EE"
+secondaryBackgroundColor = "#E5E8E0"
+textColor = "#17233A"
+borderColor = "#D3D7CC"
+linkColor = "#2B55A6"
+greenColor = "#2F7D4F"
+redColor = "#B3412E"
+orangeColor = "#B07514"
+chartCategoricalColors = ["#2B55A6", "#B07514", "#00937A"]
+
+[theme.light.sidebar]
+backgroundColor = "#E8EBE3"
+
+[theme.dark]
+primaryColor = "#6E97E6"
+backgroundColor = "#152033"
+secondaryBackgroundColor = "#1D2B42"
+textColor = "#E4E8EF"
+borderColor = "#2C3B54"
+linkColor = "#8FB0EE"
+greenColor = "#4CBF7F"
+redColor = "#E07A66"
+orangeColor = "#D08E2E"
+chartCategoricalColors = ["#6E97E6", "#D08E2E", "#2DB496"]
+
+[theme.dark.sidebar]
+backgroundColor = "#111B2C"
